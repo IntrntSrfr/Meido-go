@@ -15,7 +15,8 @@ import (
 )
 
 type Config struct {
-	Token string
+	Token            string
+	DmMessageChannel string
 }
 
 var (
@@ -84,9 +85,29 @@ func presenceUpdatedHandler(s *discordgo.Session, m *discordgo.PresenceUpdate) {
 }
 
 func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
+
+	file, e := ioutil.ReadFile("./config.json")
+	if e != nil {
+		fmt.Printf("Config file not found.")
+		return
+	}
+
+	var config Config
+	json.Unmarshal(file, &config)
+
 	args := strings.Split(m.Content, " ")
 
 	if m.Author.ID == s.State.User.ID || m.Author.Bot {
+		return
+	}
+
+	ch, err := s.Channel(m.ChannelID)
+	if err != nil {
+		return
+	}
+
+	if ch.Type == discordgo.ChannelTypeDM {
+		s.ChannelMessageSend(config.DmMessageChannel, fmt.Sprintf("%v#%v (%v)\n%v - %v", m.Author.Username, m.Author.Discriminator, m.Author.ID, ch.ID, m.Content))
 		return
 	}
 
@@ -98,10 +119,6 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		var reason string
 		var pruneDays int
 
-		ch, err := s.Channel(m.ChannelID)
-		if err != nil {
-			return
-		}
 		g, err := s.Guild(ch.GuildID)
 		if err != nil {
 			return
@@ -168,23 +185,24 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 				return
 			}
 		*/
-		s.ChannelMessageSend(userchannel.ID, fmt.Sprintf("you just got a sick ban for the following reason: %v", reason))
+
+		if reason == "" {
+			s.ChannelMessageSend(userchannel.ID, fmt.Sprintf("you just got a sick ban kiddo"))
+
+		} else {
+			s.ChannelMessageSend(userchannel.ID, fmt.Sprintf("you just got a sick ban for the following reason: %v", reason))
+		}
 
 		err = s.GuildBanCreateWithReason(g.ID, targetUser.ID, fmt.Sprintf("%v#%v - %v", m.Author.Username, m.Author.Discriminator, reason), pruneDays)
 		if err != nil {
 			s.ChannelMessageSend(ch.ID, err.Error())
 			return
 		}
-		s.ChannelMessageSend(ch.ID, fmt.Sprintf("%v#%v just got beaned", targetUser.Username, targetUser.Discriminator))
+		s.ChannelMessageSend(ch.ID, fmt.Sprintf("%v (%v) just got beaned", targetUser.Mention(), targetUser.ID))
 
 	}
 	if args[0] == "m?unban" || args[0] == ".unban" {
 		if len(args) <= 1 {
-			return
-		}
-
-		ch, err := s.Channel(m.ChannelID)
-		if err != nil {
 			return
 		}
 
@@ -234,11 +252,6 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 		newName = strings.Join(args[1:], " ")
 
-		ch, err := s.Channel(m.ChannelID)
-		if err != nil {
-			return
-		}
-
 		g, err := s.Guild(ch.GuildID)
 		if err != nil {
 			return
@@ -284,11 +297,6 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 
 		if args[0] == "m?listall" {
-			ch, err := s.Channel(m.ChannelID)
-			if err != nil {
-				return
-			}
-
 			g, err := s.Guild(ch.GuildID)
 			if err != nil {
 				return
@@ -311,11 +319,6 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 				successfulRenames int
 				failedRenames     int
 			)
-
-			ch, err := s.Channel(m.ChannelID)
-			if err != nil {
-				return
-			}
 
 			g, err := s.Guild(ch.GuildID)
 			if err != nil {
@@ -382,11 +385,6 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 			*/
 		}
 		if args[0] == "m?ping" {
-			ch, err := s.Channel(m.ChannelID)
-			if err != nil {
-				return
-			}
-
 			sendTime := time.Now()
 
 			msg, err := s.ChannelMessageSend(ch.ID, "Pong")
@@ -426,11 +424,6 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 			s.ChannelMessageSend(ch, strings.Join(args[2:], " "))
 		}
 		if args[0] == "m?lockdown" {
-			ch, err := s.Channel(m.ChannelID)
-			if err != nil {
-				return
-			}
-
 			g, err := s.Guild(ch.GuildID)
 			if err != nil {
 				s.ChannelMessageSend(ch.ID, "Error getting guild: "+err.Error())
@@ -473,10 +466,6 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 			}
 		}
 		if args[0] == "m?unlock" {
-			ch, err := s.Channel(m.ChannelID)
-			if err != nil {
-				return
-			}
 
 			g, err := s.Guild(ch.GuildID)
 			if err != nil {
@@ -519,11 +508,6 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 				inroleUsers  string
 			)
 
-			ch, err := s.Channel(m.ChannelID)
-			if err != nil {
-				return
-			}
-
 			g, err := s.Guild(ch.GuildID)
 			if err != nil {
 				return
@@ -562,11 +546,6 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		if args[0] == "m?mute" {
 			var targetUser *discordgo.User
 			var err error
-
-			ch, err := s.Channel(m.ChannelID)
-			if err != nil {
-				return
-			}
 
 			if len(m.Mentions) >= 1 {
 				targetUser = m.Mentions[0]
@@ -628,10 +607,6 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 		}
 		if args[0] == "m?unmute" {
-			ch, err := s.Channel(m.ChannelID)
-			if err != nil {
-				return
-			}
 
 			g, err := s.Guild(ch.GuildID)
 			if err != nil {
