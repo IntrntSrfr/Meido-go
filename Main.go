@@ -18,6 +18,10 @@ type Config struct {
 	Token string
 }
 
+var (
+	startTime time.Time
+)
+
 func main() {
 
 	file, e := ioutil.ReadFile("./config.json")
@@ -61,6 +65,7 @@ func addHandlers(s *discordgo.Session) {
 }
 
 func readyHandler(s *discordgo.Session, m *discordgo.Ready) {
+	startTime = time.Now()
 	fmt.Println(s.State.User.Username, "#", s.State.User.Discriminator)
 }
 
@@ -205,6 +210,16 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 			return
 		}
 		s.ChannelMessageSend(ch.ID, fmt.Sprintf("Unbanned user ID: %v", userID))
+	}
+
+	if args[0] == "m?uptime" {
+
+		thisTime := time.Now()
+
+		timespan := thisTime.Sub(startTime)
+
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Uptime: %v", timespan.String()))
+
 	}
 
 	if args[0] == "m?withnick" {
@@ -372,16 +387,16 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 				return
 			}
 
-			startTime := time.Now()
+			sendTime := time.Now()
 
 			msg, err := s.ChannelMessageSend(ch.ID, "Pong")
 			if err != nil {
 				return
 			}
 
-			endTime := time.Now()
+			receiveTime := time.Now()
 
-			delay := endTime.Sub(startTime)
+			delay := receiveTime.Sub(sendTime)
 
 			s.ChannelMessageEdit(ch.ID, msg.ID, "Pong - "+delay.String())
 		}
