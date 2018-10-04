@@ -107,6 +107,42 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	if ch.Type == discordgo.ChannelTypeDM {
+		if m.Content == "enroll me" {
+			cfc, err := s.Guild("320896491596283906")
+			if err != nil {
+				return
+			}
+
+			var enrolledRole *discordgo.Role
+
+			groles, err := s.GuildRoles(cfc.ID)
+			if err != nil {
+				return
+			}
+
+			for i := range groles {
+				role := groles[i]
+				if role.ID == "404333507918430212" {
+					enrolledRole = role
+				}
+			}
+
+			if enrolledRole == nil {
+				return
+			}
+
+			for i := range cfc.Members {
+				member := cfc.Members[i]
+
+				if member.User.ID == m.Author.ID {
+					err := s.GuildMemberRoleAdd(cfc.ID, m.Author.ID, enrolledRole.ID)
+					if err != nil {
+						return
+					}
+				}
+			}
+			return
+		}
 		s.ChannelMessageSend(config.DmMessageChannel, fmt.Sprintf("%v#%v (%v)\n%v - %v", m.Author.Username, m.Author.Discriminator, m.Author.ID, ch.ID, m.Content))
 		return
 	}
