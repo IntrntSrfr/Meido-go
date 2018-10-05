@@ -204,23 +204,10 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 			s.ChannelMessageSend(ch.ID, "no")
 			return
 		}
-		/*
-			groles := discordgo.Roles(g.Roles)
-
-			sort.Sort(groles)
-
-			groles[0].
-		*/
 		userchannel, err := s.UserChannelCreate(targetUser.ID)
 		if err != nil {
 			return
 		}
-		/*
-			_, err = s.ChannelMessageSend(userchannel.ID, fmt.Sprintf("you just got a sick ban for the following reason: %v", reason))
-			if err != nil {
-				return
-			}
-		*/
 
 		if reason == "" {
 			s.ChannelMessageSend(userchannel.ID, fmt.Sprintf("you just got a sick ban kiddo"))
@@ -234,7 +221,26 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 			s.ChannelMessageSend(ch.ID, err.Error())
 			return
 		}
-		s.ChannelMessageSend(ch.ID, fmt.Sprintf("%v (%v) just got beaned", targetUser.Mention(), targetUser.ID))
+
+		embed := &discordgo.MessageEmbed{
+			Title: "🚷 User banned",
+			Fields: []*discordgo.MessageEmbedField{
+				&discordgo.MessageEmbedField{
+					Name:   "Username",
+					Value:  fmt.Sprintf("%v", targetUser.Mention()),
+					Inline: true,
+				},
+				&discordgo.MessageEmbedField{
+					Name:   "ID",
+					Value:  fmt.Sprintf("%v", targetUser.ID),
+					Inline: true,
+				},
+			},
+
+			Color: 13107200,
+		}
+
+		s.ChannelMessageSendEmbed(ch.ID, embed)
 
 	}
 	if args[0] == "m?unban" || args[0] == ".unban" {
@@ -263,7 +269,18 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		if err != nil {
 			return
 		}
-		s.ChannelMessageSend(ch.ID, fmt.Sprintf("Unbanned user ID: %v", userID))
+
+		targetUser, err := s.User(userID)
+		if err != nil {
+			return
+		}
+
+		embed := &discordgo.MessageEmbed{
+			Description: fmt.Sprintf("**Unbanned** %v - %v#%v (%v)", targetUser.Mention(), targetUser.Username, targetUser.Discriminator, targetUser.ID),
+			Color:       51200,
+		}
+
+		s.ChannelMessageSendEmbed(ch.ID, embed)
 	}
 
 	if args[0] == "m?uptime" {
