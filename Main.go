@@ -107,7 +107,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	if ch.Type == discordgo.ChannelTypeDM {
-		if m.Content == "enroll me" {
+		if strings.ToLower(m.Content) == "enroll me" {
 			cfc, err := s.Guild("320896491596283906")
 			if err != nil {
 				return
