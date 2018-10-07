@@ -70,6 +70,7 @@ func readyHandler(s *discordgo.Session, m *discordgo.Ready) {
 	fmt.Println(s.State.User.Username, "#", s.State.User.Discriminator)
 }
 
+/*
 func presenceUpdatedHandler(s *discordgo.Session, m *discordgo.PresenceUpdate) {
 	if m.Game == nil || m.User.Bot || m.User.ID == "172002275412279296" {
 		return
@@ -83,7 +84,7 @@ func presenceUpdatedHandler(s *discordgo.Session, m *discordgo.PresenceUpdate) {
 		s.ChannelMessageSend("496570247629897738", fmt.Sprintf("%v", string(d)))
 	}
 }
-
+*/
 func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	file, e := ioutil.ReadFile("./config.json")
@@ -148,6 +149,21 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	//fmt.Printf("%v#%v - %v\n", m.Author.Username, m.Author.Discriminator, m.Content)
+
+	if args[0] == "m?ping" {
+		sendTime := time.Now()
+
+		msg, err := s.ChannelMessageSend(ch.ID, "Pong")
+		if err != nil {
+			return
+		}
+
+		receiveTime := time.Now()
+
+		delay := receiveTime.Sub(sendTime)
+
+		s.ChannelMessageEdit(ch.ID, msg.ID, "Pong - "+delay.String())
+	}
 
 	if args[0] == "m?ban" || args[0] == ".b" {
 
@@ -223,7 +239,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 
 		embed := &discordgo.MessageEmbed{
-			Title: "🚷 User banned",
+			Title: "User banned",
 			Fields: []*discordgo.MessageEmbedField{
 				&discordgo.MessageEmbedField{
 					Name:   "Username",
@@ -259,7 +275,6 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 
 		if perms&discordgo.PermissionBanMembers == 0 {
-			s.ChannelMessageSend(m.ChannelID, "u cant ban lole")
 			return
 		}
 
@@ -291,6 +306,13 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Uptime: %v", timespan.String()))
 
+	}
+
+	if args[0] == "m?umr" {
+		_, err := s.ChannelMessageSend(ch.ID, "https://i.kym-cdn.com/photos/images/original/001/007/574/ec2.jpg")
+		if err != nil {
+			return
+		}
 	}
 
 	if args[0] == "m?withnick" {
@@ -436,20 +458,6 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 				s.ChannelMessageSend(ch.ID, fmt.Sprintf("%v", n))
 			*/
-		}
-		if args[0] == "m?ping" {
-			sendTime := time.Now()
-
-			msg, err := s.ChannelMessageSend(ch.ID, "Pong")
-			if err != nil {
-				return
-			}
-
-			receiveTime := time.Now()
-
-			delay := receiveTime.Sub(sendTime)
-
-			s.ChannelMessageEdit(ch.ID, msg.ID, "Pong - "+delay.String())
 		}
 
 		if args[0] == "m?dm" {
