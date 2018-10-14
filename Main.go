@@ -138,6 +138,8 @@ func guildAvailableHandler(s *discordgo.Session, g *discordgo.GuildCreate) {
 		return
 	}
 
+	loadTimeStart := time.Now()
+
 	fmt.Println(g.Name)
 	for i := range g.Members {
 		m := g.Members[i]
@@ -174,6 +176,11 @@ func guildAvailableHandler(s *discordgo.Session, g *discordgo.GuildCreate) {
 			}
 		}
 	}
+
+	loadTimeEnd := time.Now()
+	totalLoadTime := loadTimeEnd.Sub(loadTimeStart)
+
+	fmt.Println(fmt.Sprintf("Loaded %v in %v", g.Name, totalLoadTime.String()))
 }
 
 func guildRoleDeleteHandler(s *discordgo.Session, m *discordgo.GuildRoleDelete) {
@@ -278,7 +285,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	currentTime := time.Now()
 
-	diff := dbu.Nextxpgaintime.Sub(currentTime.Add(time.Hour * time.Duration(2)))
+	diff := dbu.Nextxpgaintime.Sub(currentTime)
 
 	if diff < 0 {
 		stmt, err := db.Prepare("UPDATE discordusers SET xp = $1, nextxpgaintime=$2 WHERE userid = $3")
@@ -294,6 +301,65 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 			fmt.Println(err)
 			return
 		}
+	}
+
+	if args[0] == "m?profile" {
+
+		var targetUser *discordgo.User
+
+		targetUser = m.Author
+		if len(args) > 1 {
+
+			if len(m.Mentions) >= 1 {
+				targetUser = m.Mentions[0]
+			} else {
+				targetUser, err = s.User(args[1])
+				if err != nil {
+					//s.ChannelMessageSend(ch.ID, err.Error())
+					return
+				}
+			}
+		}
+
+		if targetUser.Bot {
+			s.ChannelMessageSend(ch.ID, "Bots dont get to join the fun")
+		}
+
+		row := db.QueryRow("SELECT * FROM discordusers WHERE userid = $1", targetUser.ID)
+
+		err := row.Scan(
+			&dbu.Uid,
+			&dbu.Userid,
+			&dbu.Username,
+			&dbu.Discriminator,
+			&dbu.Xp,
+			&dbu.Nextxpgaintime,
+			&dbu.Xpexcluded,
+			&dbu.Reputation,
+			&dbu.Cangivereptime)
+
+		if err != nil {
+			return
+		}
+
+		embed := discordgo.MessageEmbed{
+			Color: 51200,
+			Title: fmt.Sprintf("Profile for %v", targetUser.String()),
+			Fields: []*discordgo.MessageEmbedField{
+				&discordgo.MessageEmbedField{
+					Name:   "Experience",
+					Value:  strconv.Itoa(dbu.Xp),
+					Inline: true,
+				},
+				&discordgo.MessageEmbedField{
+					Name:   "Reputation",
+					Value:  strconv.Itoa(dbu.Reputation),
+					Inline: true,
+				},
+			},
+		}
+
+		s.ChannelMessageSendEmbed(ch.ID, &embed)
 	}
 
 	if args[0] == "m?rep" {
@@ -339,6 +405,10 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 				//s.ChannelMessageSend(ch.ID, err.Error())
 				return
 			}
+		}
+
+		if targetUser.Bot {
+			s.ChannelMessageSend(ch.ID, "Bots dont get to join the fun")
 		}
 
 		if u.ID == targetUser.ID {
@@ -428,6 +498,50 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	}
 
+	if args[0] == "m?rplb" {
+
+		rows, err := db.Query("SELECT * FROM discordusers WHERE xp > 0 ORDER BY reputation DESC LIMIT 10 ")
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		if rows.Err() != nil {
+			fmt.Println(rows.Err())
+		}
+
+		leaderboard := "```\n"
+
+		place := 1
+
+		for rows.Next() {
+			dbu := models.Discorduser{}
+
+			err = rows.Scan(
+				&dbu.Uid,
+				&dbu.Userid,
+				&dbu.Username,
+				&dbu.Discriminator,
+				&dbu.Xp,
+				&dbu.Nextxpgaintime,
+				&dbu.Xpexcluded,
+				&dbu.Reputation,
+				&dbu.Cangivereptime)
+
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
+
+			leaderboard += fmt.Sprintf("#%v - %v#%v - %v reputation points\n", place, dbu.Username, dbu.Discriminator, dbu.Reputation)
+			place++
+		}
+		leaderboard += "```"
+
+		s.ChannelMessageSend(ch.ID, leaderboard)
+
+	}
+
 	if args[0] == "m?setuserrole" {
 		if len(args) < 3 {
 			return
@@ -443,6 +557,10 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 				s.ChannelMessageSend(ch.ID, err.Error())
 				return
 			}
+		}
+
+		if targetUser.Bot {
+			s.ChannelMessageSend(ch.ID, "Bots dont get to join the fun")
 		}
 
 		g, err := s.Guild(ch.GuildID)
