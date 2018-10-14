@@ -343,8 +343,9 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 
 		embed := discordgo.MessageEmbed{
-			Color: 51200,
-			Title: fmt.Sprintf("Profile for %v", targetUser.String()),
+			Color:     51200,
+			Title:     fmt.Sprintf("Profile for %v", targetUser.String()),
+			Thumbnail: &discordgo.MessageEmbedThumbnail{URL: targetUser.AvatarURL("1024")},
 			Fields: []*discordgo.MessageEmbedField{
 				&discordgo.MessageEmbedField{
 					Name:   "Experience",
