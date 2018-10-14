@@ -1,9 +1,12 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"math/rand"
+	"meido-go/models"
 	"os"
 	"os/signal"
 	"strconv"
@@ -12,15 +15,19 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	_ "github.com/lib/pq"
 )
 
 type Config struct {
 	Token            string
 	DmMessageChannel string
+	Connectionstring string
 }
 
 var (
 	startTime time.Time
+	db        *sql.DB
+	config    Config
 )
 
 func main() {
@@ -31,7 +38,6 @@ func main() {
 		return
 	}
 
-	var config Config
 	json.Unmarshal(file, &config)
 
 	token := config.Token
@@ -42,10 +48,14 @@ func main() {
 		return
 	}
 
+	db, err = sql.Open("postgres", config.Connectionstring)
+	if err != nil {
+		panic("could not connect to db " + err.Error())
+	}
+
 	addHandlers(client)
 
 	err = client.Open()
-
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -56,45 +66,141 @@ func main() {
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
 	<-sc
 
+	defer db.Close()
 	client.Close()
 }
 
 func addHandlers(s *discordgo.Session) {
-	s.AddHandler(readyHandler)
 	//s.AddHandler(presenceUpdatedHandler)
-	s.AddHandler(messageReceivedHandler)
+	go s.AddHandler(guildAvailableHandler)
+	go s.AddHandler(guildRoleDeleteHandler)
+	go s.AddHandler(messageReceivedHandler)
+	go s.AddHandler(readyHandler)
+}
+
+func random(min, max int) int {
+	rand.Seed(time.Now().Unix())
+	return rand.Intn(max-min) + min
 }
 
 func readyHandler(s *discordgo.Session, m *discordgo.Ready) {
 	startTime = time.Now()
-	fmt.Println(s.State.User.Username, "#", s.State.User.Discriminator)
+	fmt.Println("Logged in as "+s.State.User.Username, "#", s.State.User.Discriminator)
+
 }
 
-/*
-func presenceUpdatedHandler(s *discordgo.Session, m *discordgo.PresenceUpdate) {
-	if m.Game == nil || m.User.Bot || m.User.ID == "172002275412279296" {
+func memberJoinedHandler(s *discordgo.Session, m *discordgo.GuildMemberAdd) {
+	sqlstr := "INSERT INTO discordusers(userid, username, discriminator, xp, nextxpgaintime, xpexcluded, reputation, cangivereptime) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)"
+
+	stmt, err := db.Prepare(sqlstr)
+	if err != nil {
 		return
 	}
 
-	d, _ := json.MarshalIndent(m, "", "\t")
+	if m.User.Bot {
+		return
+	}
 
-	//	s.ChannelMessageSend("496570247629897738", fmt.Sprintf("%v\n", string(d)))
+	row := db.QueryRow("SELECT * FROM discordusers WHERE userid = $1", m.User.ID)
 
-	if int(m.Game.Type) == 1 {
-		s.ChannelMessageSend("496570247629897738", fmt.Sprintf("%v", string(d)))
+	user := models.Discorduser{}
+
+	err = row.Scan(
+		&user.Uid,
+		&user.Userid,
+		&user.Username,
+		&user.Discriminator,
+		&user.Xp,
+		&user.Nextxpgaintime,
+		&user.Xpexcluded,
+		&user.Reputation,
+		&user.Cangivereptime)
+
+	currentTime := time.Now()
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			//var lastInsertID int
+			_, err := stmt.Exec(m.User.ID, m.User.Username, m.User.Discriminator, 0, currentTime, false, 0, currentTime)
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
+		}
 	}
 }
-*/
+
+func guildAvailableHandler(s *discordgo.Session, g *discordgo.GuildCreate) {
+	sqlstr := "INSERT INTO discordusers(userid, username, discriminator, xp, nextxpgaintime, xpexcluded, reputation, cangivereptime) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)"
+
+	stmt, err := db.Prepare(sqlstr)
+	if err != nil {
+		return
+	}
+
+	fmt.Println(g.Name)
+	for i := range g.Members {
+		m := g.Members[i]
+
+		if m.User.Bot {
+			continue
+		}
+
+		row := db.QueryRow("SELECT * FROM discordusers WHERE userid = $1", m.User.ID)
+
+		user := models.Discorduser{}
+
+		err = row.Scan(
+			&user.Uid,
+			&user.Userid,
+			&user.Username,
+			&user.Discriminator,
+			&user.Xp,
+			&user.Nextxpgaintime,
+			&user.Xpexcluded,
+			&user.Reputation,
+			&user.Cangivereptime)
+
+		currentTime := time.Now()
+
+		if err != nil {
+			if err == sql.ErrNoRows {
+				//var lastInsertID int
+				_, err := stmt.Exec(m.User.ID, m.User.Username, m.User.Discriminator, 0, currentTime, false, 0, currentTime)
+				if err != nil {
+					fmt.Println(err)
+					continue
+				}
+			}
+		}
+	}
+}
+
+func guildRoleDeleteHandler(s *discordgo.Session, m *discordgo.GuildRoleDelete) {
+	row := db.QueryRow("SELECT * FROM userroles WHERE guildid=$1 AND roleid=$2", m.GuildID, m.RoleID)
+
+	ur := models.Userrole{}
+
+	err := row.Scan(&ur.Uid,
+		&ur.Guildid,
+		&ur.Roleid,
+		&ur.Userid)
+	if err != nil {
+		return
+	}
+
+	stmt, err := db.Prepare("DELETE FROM userroles WHERE guildid=$1 AND roleid=$2")
+	if err != nil {
+		return
+	}
+
+	_, err = stmt.Exec(m.GuildID, m.RoleID)
+	if err != nil {
+		return
+	}
+}
+
 func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
-
-	file, e := ioutil.ReadFile("./config.json")
-	if e != nil {
-		fmt.Printf("Config file not found.")
-		return
-	}
-
-	var config Config
-	json.Unmarshal(file, &config)
 
 	args := strings.Split(m.Content, " ")
 
@@ -148,7 +254,296 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	//fmt.Printf("%v#%v - %v\n", m.Author.Username, m.Author.Discriminator, m.Content)
+	row := db.QueryRow("SELECT * FROM discordusers WHERE userid = $1", m.Author.ID)
+	if err != nil {
+		return
+	}
+
+	dbu := models.Discorduser{}
+
+	err = row.Scan(
+		&dbu.Uid,
+		&dbu.Userid,
+		&dbu.Username,
+		&dbu.Discriminator,
+		&dbu.Xp,
+		&dbu.Nextxpgaintime,
+		&dbu.Xpexcluded,
+		&dbu.Reputation,
+		&dbu.Cangivereptime)
+
+	if err != nil {
+		return
+	}
+
+	currentTime := time.Now()
+
+	diff := dbu.Nextxpgaintime.Sub(currentTime.Add(time.Hour * time.Duration(2)))
+
+	if diff < 0 {
+		stmt, err := db.Prepare("UPDATE discordusers SET xp = $1, nextxpgaintime=$2 WHERE userid = $3")
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		randomXp := random(15, 26)
+
+		_, err = stmt.Exec(dbu.Xp+randomXp, currentTime.Add(time.Minute*time.Duration(2)), dbu.Userid)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+	}
+
+	if args[0] == "m?rep" {
+
+		u := m.Author
+
+		row := db.QueryRow("SELECT * FROM discordusers WHERE userid = $1", u.ID)
+
+		dbu := models.Discorduser{}
+
+		err = row.Scan(
+			&dbu.Uid,
+			&dbu.Userid,
+			&dbu.Username,
+			&dbu.Discriminator,
+			&dbu.Xp,
+			&dbu.Nextxpgaintime,
+			&dbu.Xpexcluded,
+			&dbu.Reputation,
+			&dbu.Cangivereptime)
+
+		if err != nil {
+			return
+		}
+
+		diff := dbu.Cangivereptime.Sub(currentTime.Add(time.Hour * time.Duration(2)))
+
+		if len(args) < 2 {
+			if diff > 0 {
+				s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Color: 13107200, Description: strings.TrimSuffix(fmt.Sprintf("You can award a reputation point in %v", diff.Round(time.Minute).String()), "0s")})
+			} else {
+				s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Color: 51200, Description: "You can award a reputation point."})
+			}
+			return
+		}
+
+		var targetUser *discordgo.User
+		if len(m.Mentions) >= 1 {
+			targetUser = m.Mentions[0]
+		} else {
+			targetUser, err = s.User(args[1])
+			if err != nil {
+				//s.ChannelMessageSend(ch.ID, err.Error())
+				return
+			}
+		}
+
+		if u.ID == targetUser.ID {
+			s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Color: 13107200, Description: "You cannot award yourself a reputation point."})
+			return
+		}
+		if diff > 0 {
+			s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{
+				Color: 13107200,
+				//Description: fmt.Sprintf("You can award a reputation point in %dh%dm", int64(diff.Hours()), int64(diff.Round(time.Second)))})
+				Description: strings.TrimSuffix(fmt.Sprintf("You can award a reputation point in %v", diff.Round(time.Minute).String()), "0s")})
+			return
+		}
+
+		row = db.QueryRow("SELECT * FROM discordusers WHERE userid = $1", targetUser.ID)
+
+		dbtu := models.Discorduser{}
+
+		err = row.Scan(
+			&dbtu.Uid,
+			&dbtu.Userid,
+			&dbtu.Username,
+			&dbtu.Discriminator,
+			&dbtu.Xp,
+			&dbtu.Nextxpgaintime,
+			&dbtu.Xpexcluded,
+			&dbtu.Reputation,
+			&dbtu.Cangivereptime)
+
+		if err != nil {
+			return
+		}
+
+		_, err = db.Exec("UPDATE discordusers SET reputation = $1 WHERE userid = $2", dbtu.Reputation+1, dbtu.Userid)
+		if err != nil {
+			return
+		}
+		_, err = db.Exec("UPDATE discordusers SET cangivereptime = $1 WHERE userid = $2", currentTime.Add(time.Hour*time.Duration(24)), dbu.Userid)
+		if err != nil {
+			return
+		}
+
+		s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Color: 51200, Description: fmt.Sprintf("%v awarded %v a reputation point!", u.Mention(), targetUser.Mention())})
+	}
+
+	if args[0] == "m?lb" {
+
+		rows, err := db.Query("SELECT * FROM discordusers WHERE xp > 0 ORDER BY xp DESC LIMIT 10 ")
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		if rows.Err() != nil {
+			fmt.Println(rows.Err())
+		}
+
+		leaderboard := "```\n"
+
+		place := 1
+
+		for rows.Next() {
+			dbu := models.Discorduser{}
+
+			err = rows.Scan(
+				&dbu.Uid,
+				&dbu.Userid,
+				&dbu.Username,
+				&dbu.Discriminator,
+				&dbu.Xp,
+				&dbu.Nextxpgaintime,
+				&dbu.Xpexcluded,
+				&dbu.Reputation,
+				&dbu.Cangivereptime)
+
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
+
+			leaderboard += fmt.Sprintf("#%v - %v#%v - %vxp\n", place, dbu.Username, dbu.Discriminator, dbu.Xp)
+			place++
+		}
+		leaderboard += "```"
+
+		s.ChannelMessageSend(ch.ID, leaderboard)
+
+	}
+
+	if args[0] == "m?setuserrole" {
+		if len(args) < 3 {
+			return
+		}
+
+		var targetUser *discordgo.User
+
+		if len(m.Mentions) >= 1 {
+			targetUser = m.Mentions[0]
+		} else {
+			targetUser, err = s.User(args[1])
+			if err != nil {
+				s.ChannelMessageSend(ch.ID, err.Error())
+				return
+			}
+		}
+
+		g, err := s.Guild(ch.GuildID)
+		if err != nil {
+			s.ChannelMessageSend(ch.ID, err.Error())
+			return
+		}
+
+		perms, err := s.UserChannelPermissions(m.Author.ID, m.ChannelID)
+		if err != nil {
+			return
+		}
+
+		if perms&discordgo.PermissionManageRoles == 0 {
+			return
+		}
+
+		var selectedRole *discordgo.Role
+
+		for i := range g.Roles {
+			role := g.Roles[i]
+
+			if role.ID == args[2] {
+				selectedRole = role
+			} else if strings.ToLower(role.Name) == strings.ToLower(strings.Join(args[2:], " ")) {
+				selectedRole = role
+			}
+		}
+
+		if selectedRole == nil {
+			s.ChannelMessageSend(ch.ID, "Role not found")
+			return
+		}
+
+		var lastinsertid int
+		err = db.QueryRow("INSERT INTO userroles(guildid, userid, roleid) VALUES($1, $2, $3) returning uid", g.ID, targetUser.ID, selectedRole.ID).Scan(&lastinsertid)
+		if err != nil {
+			s.ChannelMessageSend(ch.ID, err.Error())
+			return
+		}
+
+		s.ChannelMessageSend(ch.ID, fmt.Sprintf("Bound role **%v** to user **%v#%v**", selectedRole.Name, targetUser.Username, targetUser.Discriminator))
+
+	}
+
+	if args[0] == "m?mycolor" {
+		if len(args) != 2 {
+			return
+		}
+
+		u := m.Author
+
+		g, err := s.Guild(ch.GuildID)
+		if err != nil {
+			s.ChannelMessageSend(ch.ID, err.Error())
+			return
+		}
+
+		row := db.QueryRow("SELECT * FROM userroles WHERE guildid=$1 AND userid=$2", g.ID, u.ID)
+
+		ur := models.Userrole{}
+
+		err = row.Scan(&ur.Uid,
+			&ur.Guildid,
+			&ur.Userid,
+			&ur.Roleid)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				s.ChannelMessageSend(ch.ID, "You dont have a custom role set.")
+			}
+			return
+		}
+
+		if strings.HasPrefix(args[1], "#") {
+			args[1] = args[1][1:]
+		}
+
+		color, err := strconv.ParseInt("0x"+args[1], 0, 64)
+		if err != nil {
+			s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Description: "Invalid color code.", Color: 13107200})
+			return
+		}
+
+		for i := range g.Roles {
+			role := g.Roles[i]
+
+			if role.ID == ur.Roleid {
+				_, err = s.GuildRoleEdit(g.ID, role.ID, role.Name, int(color), role.Hoist, role.Permissions, role.Mentionable)
+				if err != nil {
+					s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Description: "Invalid color code.", Color: 13107200})
+					return
+				}
+			}
+		}
+
+		embed := discordgo.MessageEmbed{
+			Color:       int(color),
+			Description: fmt.Sprintf("Color changed to #%v", args[1]),
+		}
+		s.ChannelMessageSendEmbed(ch.ID, &embed)
+	}
 
 	if args[0] == "m?ping" {
 		sendTime := time.Now()
@@ -484,7 +879,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 			s.ChannelMessageSend(ch, strings.Join(args[2:], " "))
 		}
-		if args[0] == "m?lockdown" {
+		if args[0] == "m!lockdown" {
 			g, err := s.Guild(ch.GuildID)
 			if err != nil {
 				s.ChannelMessageSend(ch.ID, "Error getting guild: "+err.Error())
@@ -508,7 +903,22 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 				if gr[i].Name == "@everyone" {
 					everyoneRole := gr[i]
 
-					err := s.ChannelPermissionSet(ch.ID, everyoneRole.ID, "role", 0, 2048)
+					var everyoneoverwrites *discordgo.PermissionOverwrite
+
+					for i := range ch.PermissionOverwrites {
+						perms := ch.PermissionOverwrites[i]
+						if perms.ID == everyoneRole.ID {
+							everyoneoverwrites = perms
+						}
+					}
+
+					fmt.Println(everyoneoverwrites.Deny, discordgo.PermissionSendMessages, everyoneoverwrites.Deny&discordgo.PermissionSendMessages)
+
+					if everyoneoverwrites.Deny&discordgo.PermissionSendMessages != 0 {
+						return
+					}
+
+					err = s.ChannelPermissionSet(ch.ID, everyoneRole.ID, "role", everyoneoverwrites.Allow-discordgo.PermissionSendMessages, everyoneoverwrites.Deny+discordgo.PermissionSendMessages)
 					if err != nil {
 						s.ChannelMessageSend(ch.ID, err.Error())
 						return
@@ -526,7 +936,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 				//s.ChannelMessageSend(ch.ID, string(gamer))
 			}
 		}
-		if args[0] == "m?unlock" {
+		if args[0] == "m!unlock" {
 
 			g, err := s.Guild(ch.GuildID)
 			if err != nil {
@@ -544,7 +954,22 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 				if gr[i].Name == "@everyone" {
 					everyoneRole := gr[i]
 
-					err := s.ChannelPermissionSet(ch.ID, everyoneRole.ID, "role", 2048, 0)
+					var everyoneoverwrites *discordgo.PermissionOverwrite
+
+					for i := range ch.PermissionOverwrites {
+						perms := ch.PermissionOverwrites[i]
+						if perms.ID == everyoneRole.ID {
+							everyoneoverwrites = perms
+						}
+					}
+
+					fmt.Println(everyoneoverwrites.Deny, discordgo.PermissionSendMessages, everyoneoverwrites.Deny&discordgo.PermissionSendMessages)
+
+					if everyoneoverwrites.Deny&discordgo.PermissionSendMessages == 0 {
+						return
+					}
+
+					err := s.ChannelPermissionSet(ch.ID, everyoneRole.ID, "role", everyoneoverwrites.Allow, everyoneoverwrites.Deny-discordgo.PermissionSendMessages)
 					if err != nil {
 						s.ChannelMessageSend(ch.ID, err.Error())
 						return
