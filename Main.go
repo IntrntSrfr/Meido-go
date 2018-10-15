@@ -686,7 +686,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		s.ChannelMessageSendEmbed(ch.ID, &embed)
 	}
 
-	if strings.Join(args[0:1], " ") == "m?myrole color" {
+	if strings.Join(args[0:2], " ") == "m?myrole color" {
 		if len(args) != 3 {
 			return
 		}
@@ -747,7 +747,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		s.ChannelMessageSendEmbed(ch.ID, &embed)
 	}
 
-	if strings.Join(args[0:1], " ") == "m?myrole name" {
+	if strings.Join(args[0:2], " ") == "m?myrole name" {
 
 		if len(args) < 3 {
 			return
