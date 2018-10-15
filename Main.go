@@ -545,7 +545,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	}
 
-	if args[0] == "m!setuserrole" {
+	if args[0] == "m?setuserrole" {
 		if len(args) < 3 {
 			return
 		}
@@ -613,7 +613,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 		} */
 
-	if args[0] == "m!myrole" {
+	if args[0] == "m?myrole" {
 
 		if len(args) >= 2 {
 
