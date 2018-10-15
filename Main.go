@@ -306,8 +306,6 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if args[0] == "m?profile" {
 
 		var targetUser *discordgo.User
-
-		targetUser = m.Author
 		if len(args) > 1 {
 
 			if len(m.Mentions) >= 1 {
@@ -319,6 +317,10 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 					return
 				}
 			}
+		}
+
+		if targetUser == nil {
+			targetUser = m.Author
 		}
 
 		if targetUser.Bot {
@@ -607,8 +609,85 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	}
 
-	if args[0] == "m?mycolor" {
-		if len(args) != 2 {
+	if args[0] == "m?myrole" {
+
+		var targetUser *discordgo.User
+
+		if len(args) > 1 {
+
+			if len(m.Mentions) >= 1 {
+				targetUser = m.Mentions[0]
+			} else {
+				targetUser, err = s.User(args[1])
+				if err != nil {
+					//s.ChannelMessageSend(ch.ID, err.Error())
+					return
+				}
+			}
+		}
+
+		if targetUser == nil {
+			targetUser = m.Author
+		}
+
+		if targetUser.Bot {
+			s.ChannelMessageSend(ch.ID, "Bots dont get to join the fun")
+		}
+
+		u := targetUser
+
+		g, err := s.Guild(ch.GuildID)
+		if err != nil {
+			s.ChannelMessageSend(ch.ID, err.Error())
+			return
+		}
+
+		row := db.QueryRow("SELECT * FROM userroles WHERE guildid=$1 AND userid=$2", g.ID, u.ID)
+
+		ur := models.Userrole{}
+
+		err = row.Scan(&ur.Uid,
+			&ur.Guildid,
+			&ur.Userid,
+			&ur.Roleid)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				s.ChannelMessageSend(ch.ID, "You dont have a custom role set.")
+			}
+			return
+		}
+
+		var customRole *discordgo.Role
+
+		for i := range g.Roles {
+			role := g.Roles[i]
+
+			if role.ID == ur.Roleid {
+				customRole = role
+			}
+		}
+
+		embed := discordgo.MessageEmbed{
+			Color: int(customRole.Color),
+			Title: fmt.Sprintf("Custom role for %v", u.String()),
+			Fields: []*discordgo.MessageEmbedField{
+				&discordgo.MessageEmbedField{
+					Name:   "Name",
+					Value:  customRole.Name,
+					Inline: true,
+				},
+				&discordgo.MessageEmbedField{
+					Name:   "Color",
+					Value:  fmt.Sprintf("#%X", customRole.Color),
+					Inline: true,
+				},
+			},
+		}
+		s.ChannelMessageSendEmbed(ch.ID, &embed)
+	}
+
+	if args[0] == "m?myrole color" {
+		if len(args) != 3 {
 			return
 		}
 
@@ -639,7 +718,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 			args[1] = args[1][1:]
 		}
 
-		color, err := strconv.ParseInt("0x"+args[1], 0, 64)
+		color, err := strconv.ParseInt("0x"+args[2], 0, 64)
 		if err != nil {
 			s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Description: "Invalid color code.", Color: 13107200})
 			return
@@ -651,6 +730,10 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 			if role.ID == ur.Roleid {
 				_, err = s.GuildRoleEdit(g.ID, role.ID, role.Name, int(color), role.Hoist, role.Permissions, role.Mentionable)
 				if err != nil {
+					if strings.Contains(err.Error(), strconv.Itoa(discordgo.ErrCodeMissingPermissions)) {
+						s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Description: "Missing permissions.", Color: 13107200})
+						return
+					}
 					s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Description: "Invalid color code.", Color: 13107200})
 					return
 				}
@@ -659,7 +742,65 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 		embed := discordgo.MessageEmbed{
 			Color:       int(color),
-			Description: fmt.Sprintf("Color changed to #%v", args[1]),
+			Description: fmt.Sprintf("Color changed to #%v", args[2]),
+		}
+		s.ChannelMessageSendEmbed(ch.ID, &embed)
+	}
+
+	if args[0] == "m?myrole name" {
+
+		if len(args) < 3 {
+			return
+		}
+
+		newName := strings.Join(args[2:], " ")
+
+		u := m.Author
+
+		g, err := s.Guild(ch.GuildID)
+		if err != nil {
+			s.ChannelMessageSend(ch.ID, err.Error())
+			return
+		}
+
+		row := db.QueryRow("SELECT * FROM userroles WHERE guildid=$1 AND userid=$2", g.ID, u.ID)
+
+		ur := models.Userrole{}
+
+		err = row.Scan(&ur.Uid,
+			&ur.Guildid,
+			&ur.Userid,
+			&ur.Roleid)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				s.ChannelMessageSend(ch.ID, "You dont have a custom role set.")
+			}
+			return
+		}
+
+		var color int
+
+		for i := range g.Roles {
+			role := g.Roles[i]
+
+			color = role.Color
+
+			if role.ID == ur.Roleid {
+				_, err = s.GuildRoleEdit(g.ID, role.ID, newName, role.Color, role.Hoist, role.Permissions, role.Mentionable)
+				if err != nil {
+					if strings.Contains(err.Error(), strconv.Itoa(discordgo.ErrCodeMissingPermissions)) {
+						s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Description: "Missing permissions.", Color: 13107200})
+						return
+					}
+					s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Description: "Some error occured: `" + err.Error() + "`.", Color: 13107200})
+					return
+				}
+			}
+		}
+
+		embed := discordgo.MessageEmbed{
+			Color:       int(color),
+			Description: fmt.Sprintf("Role name changed to #%v", newName),
 		}
 		s.ChannelMessageSendEmbed(ch.ID, &embed)
 	}
