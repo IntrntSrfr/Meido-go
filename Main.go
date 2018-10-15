@@ -731,7 +731,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 				embed := discordgo.MessageEmbed{
 					Color:       int(color),
-					Description: fmt.Sprintf("Role name changed to #%v", newName),
+					Description: fmt.Sprintf("Role name changed to %v", newName),
 				}
 				s.ChannelMessageSendEmbed(ch.ID, &embed)
 			}
