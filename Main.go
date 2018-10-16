@@ -30,6 +30,11 @@ var (
 	config    Config
 )
 
+const (
+	dColorRed   = 13107200
+	dColorGreen = 51200
+)
+
 func main() {
 
 	file, e := ioutil.ReadFile("./config.json")
@@ -303,6 +308,48 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 	}
 
+	if args[0] == "m?avatar" || args[0] == "m?av" || args[0] == ">av" {
+
+		ch, _ := s.Channel(m.ChannelID)
+
+		var targetUser *discordgo.User
+		var err error
+
+		if len(args) > 1 {
+
+			if len(m.Mentions) >= 1 {
+				targetUser = m.Mentions[0]
+			} else {
+				targetUser, err = s.User(args[1])
+				if err != nil {
+					//s.ChannelMessageSend(ch.ID, err.Error())
+					return
+				}
+			}
+		}
+
+		if targetUser == nil {
+			targetUser = m.Author
+		}
+
+		fmt.Println(targetUser.Avatar)
+
+		if targetUser.Avatar == "" {
+			s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{
+				Color:       dColorRed,
+				Description: fmt.Sprintf("%v has no avatar set.", targetUser.String()),
+			})
+		} else {
+
+			s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{
+				Color: dColorGreen,
+				Title: targetUser.String(),
+				Image: &discordgo.MessageEmbedImage{URL: targetUser.AvatarURL("1024")},
+			})
+		}
+
+	}
+
 	if args[0] == "m?profile" {
 
 		var targetUser *discordgo.User
@@ -325,6 +372,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 		if targetUser.Bot {
 			s.ChannelMessageSend(ch.ID, "Bots dont get to join the fun")
+			return
 		}
 
 		row := db.QueryRow("SELECT * FROM discordusers WHERE userid = $1", targetUser.ID)
@@ -345,7 +393,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 
 		embed := discordgo.MessageEmbed{
-			Color:     51200,
+			Color:     dColorGreen,
 			Title:     fmt.Sprintf("Profile for %v", targetUser.String()),
 			Thumbnail: &discordgo.MessageEmbedThumbnail{URL: targetUser.AvatarURL("1024")},
 			Fields: []*discordgo.MessageEmbedField{
@@ -392,9 +440,9 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 		if len(args) < 2 {
 			if diff > 0 {
-				s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Color: 13107200, Description: strings.TrimSuffix(fmt.Sprintf("You can award a reputation point in %v", diff.Round(time.Minute).String()), "0s")})
+				s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Color: dColorRed, Description: strings.TrimSuffix(fmt.Sprintf("You can award a reputation point in %v", diff.Round(time.Minute).String()), "0s")})
 			} else {
-				s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Color: 51200, Description: "You can award a reputation point."})
+				s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Color: dColorGreen, Description: "You can award a reputation point."})
 			}
 			return
 		}
@@ -412,10 +460,11 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 		if targetUser.Bot {
 			s.ChannelMessageSend(ch.ID, "Bots dont get to join the fun")
+			return
 		}
 
 		if u.ID == targetUser.ID {
-			s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Color: 13107200, Description: "You cannot award yourself a reputation point."})
+			s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Color: dColorRed, Description: "You cannot award yourself a reputation point."})
 			return
 		}
 		if diff > 0 {
@@ -550,6 +599,16 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 			return
 		}
 
+		perms, err := s.UserChannelPermissions(m.Author.ID, m.ChannelID)
+		if err != nil {
+			return
+		}
+
+		if perms&discordgo.PermissionManageRoles == 0 {
+			s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Color: dColorRed, Description: "You do not have the required permissions."})
+			return
+		}
+
 		var targetUser *discordgo.User
 
 		if len(m.Mentions) >= 1 {
@@ -564,20 +623,12 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 		if targetUser.Bot {
 			s.ChannelMessageSend(ch.ID, "Bots dont get to join the fun")
+			return
 		}
 
 		g, err := s.Guild(ch.GuildID)
 		if err != nil {
 			s.ChannelMessageSend(ch.ID, err.Error())
-			return
-		}
-
-		perms, err := s.UserChannelPermissions(m.Author.ID, m.ChannelID)
-		if err != nil {
-			return
-		}
-
-		if perms&discordgo.PermissionManageRoles == 0 {
 			return
 		}
 
@@ -608,10 +659,6 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		s.ChannelMessageSend(ch.ID, fmt.Sprintf("Bound role **%v** to user **%v#%v**", selectedRole.Name, targetUser.Username, targetUser.Discriminator))
 
 	}
-	/*
-		if args[0] == "m!myrole" {
-
-		} */
 
 	if args[0] == "m?myrole" {
 
@@ -709,14 +756,13 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 					return
 				}
 
-				var color int
+				var oldRole *discordgo.Role
 
 				for i := range g.Roles {
 					role := g.Roles[i]
 
-					color = role.Color
-
 					if role.ID == ur.Roleid {
+						oldRole = role
 						_, err = s.GuildRoleEdit(g.ID, role.ID, newName, role.Color, role.Hoist, role.Permissions, role.Mentionable)
 						if err != nil {
 							if strings.Contains(err.Error(), strconv.Itoa(discordgo.ErrCodeMissingPermissions)) {
@@ -730,8 +776,8 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 				}
 
 				embed := discordgo.MessageEmbed{
-					Color:       int(color),
-					Description: fmt.Sprintf("Role name changed to %v", newName),
+					Color:       int(oldRole.Color),
+					Description: fmt.Sprintf("Role name changed from %v to %v", oldRole.Name, newName),
 				}
 				s.ChannelMessageSendEmbed(ch.ID, &embed)
 			}
@@ -757,6 +803,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 		if targetUser.Bot {
 			s.ChannelMessageSend(ch.ID, "Bots dont get to join the fun")
+			return
 		}
 
 		u := targetUser
@@ -828,6 +875,10 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	if args[0] == "m?ban" || args[0] == ".b" {
 
+		if len(args) <= 1 {
+			return
+		}
+
 		var targetUser *discordgo.User
 		var reason string
 		var pruneDays int
@@ -848,10 +899,6 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 
 		if perms&discordgo.PermissionBanMembers == 0 {
-			return
-		}
-
-		if len(args) <= 1 {
 			return
 		}
 
