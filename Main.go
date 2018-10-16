@@ -83,6 +83,17 @@ func addHandlers(s *discordgo.Session) {
 	go s.AddHandler(readyHandler)
 }
 
+func fullHex(hex string) string {
+	i := len(hex)
+
+	for i < 6 {
+		hex = "0" + hex
+		i++
+	}
+
+	return hex
+}
+
 func random(min, max int) int {
 	rand.Seed(time.Now().Unix())
 	return rand.Intn(max-min) + min
@@ -696,21 +707,24 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 				color, err := strconv.ParseInt("0x"+args[2], 0, 64)
 				if err != nil {
-					s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Description: "Invalid color code.", Color: 13107200})
+					s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Description: "Invalid color code.", Color: dColorRed})
 					return
 				}
+
+				var oldRole *discordgo.Role
 
 				for i := range g.Roles {
 					role := g.Roles[i]
 
 					if role.ID == ur.Roleid {
+						oldRole = role
 						_, err = s.GuildRoleEdit(g.ID, role.ID, role.Name, int(color), role.Hoist, role.Permissions, role.Mentionable)
 						if err != nil {
 							if strings.Contains(err.Error(), strconv.Itoa(discordgo.ErrCodeMissingPermissions)) {
-								s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Description: "Missing permissions.", Color: 13107200})
+								s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Description: "Missing permissions.", Color: dColorRed})
 								return
 							}
-							s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Description: "Invalid color code.", Color: 13107200})
+							s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Description: "Invalid color code.", Color: dColorRed})
 							return
 						}
 					}
@@ -718,7 +732,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 				embed := discordgo.MessageEmbed{
 					Color:       int(color),
-					Description: fmt.Sprintf("Color changed to #%v", args[2]),
+					Description: fmt.Sprintf("Color changed from %v to #%v", fmt.Sprintf("#"+fullHex(fmt.Sprintf("%X", oldRole.Color))), args[2]),
 				}
 				s.ChannelMessageSendEmbed(ch.ID, &embed)
 			}
@@ -822,7 +836,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 			&ur.Roleid)
 		if err != nil {
 			if err == sql.ErrNoRows {
-				s.ChannelMessageSend(ch.ID, "You dont have a custom role set.")
+				s.ChannelMessageSend(ch.ID, "No custom role set.")
 			}
 			return
 		}
@@ -848,7 +862,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 				},
 				&discordgo.MessageEmbedField{
 					Name:   "Color",
-					Value:  fmt.Sprintf("#%X", customRole.Color),
+					Value:  fmt.Sprintf("#" + fullHex(fmt.Sprintf("%X", customRole.Color))),
 					Inline: true,
 				},
 			},
