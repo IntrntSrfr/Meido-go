@@ -732,7 +732,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 				embed := discordgo.MessageEmbed{
 					Color:       int(color),
-					Description: fmt.Sprintf("Color changed from %v to #%v", fmt.Sprintf("#"+fullHex(fmt.Sprintf("%X", oldRole.Color))), fmt.Sprintf("#"+fullHex(fmt.Sprintf("%X", color)))),
+					Description: fmt.Sprintf("Color changed from #%v to #%v", fullHex(fmt.Sprintf("%X", oldRole.Color)), fullHex(fmt.Sprintf("%X", color))),
 				}
 				s.ChannelMessageSendEmbed(ch.ID, &embed)
 			}
