@@ -332,8 +332,6 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 			targetUser = m.Author
 		}
 
-		fmt.Println(targetUser.Avatar)
-
 		if targetUser.Avatar == "" {
 			s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{
 				Color:       dColorRed,
