@@ -226,7 +226,7 @@ func guildRoleDeleteHandler(s *discordgo.Session, m *discordgo.GuildRoleDelete) 
 
 func messageUpdateHandler(s *discordgo.Session, m *discordgo.MessageUpdate) {
 
-	if m.Author.ID == s.State.User.ID || m.Author.Bot {
+	if m.Author.Bot {
 		return
 	}
 
