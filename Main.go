@@ -19,15 +19,16 @@ import (
 )
 
 type Config struct {
-	Token            string
-	DmMessageChannel string
-	Connectionstring string
+	Token            string   `json:"Token"`
+	DmMessageChannel []string `json:"DmMessageChannel"`
+	Connectionstring string   `json:"Connectionstring"`
 }
 
 var (
-	startTime time.Time
-	db        *sql.DB
-	config    Config
+	startTime  time.Time
+	totalUsers int
+	db         *sql.DB
+	config     Config
 )
 
 const (
@@ -102,7 +103,6 @@ func random(min, max int) int {
 func readyHandler(s *discordgo.Session, m *discordgo.Ready) {
 	startTime = time.Now()
 	fmt.Println("Logged in as "+s.State.User.Username, "#", s.State.User.Discriminator)
-
 }
 
 func memberJoinedHandler(s *discordgo.Session, m *discordgo.GuildMemberAdd) {
@@ -271,10 +271,57 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 					}
 				}
 			}
-			return
+		} else {
+
+			for i := range config.DmMessageChannel {
+				dmch := config.DmMessageChannel[i]
+
+				dmembed := discordgo.MessageEmbed{
+					Color:       16777215,
+					Title:       fmt.Sprintf("Message from %v", m.Author.String()),
+					Description: m.Content,
+					Footer:      &discordgo.MessageEmbedFooter{Text: m.Author.ID},
+					Timestamp:   string(m.Timestamp),
+				}
+
+				_, err := s.ChannelMessageSendEmbed(dmch, &dmembed)
+				if err != nil {
+					fmt.Println(err)
+					continue
+				}
+			}
 		}
-		s.ChannelMessageSend(config.DmMessageChannel, fmt.Sprintf("%v#%v (%v)\n%v - %v", m.Author.Username, m.Author.Discriminator, m.Author.ID, ch.ID, m.Content))
 		return
+	}
+
+	perms, err := s.UserChannelPermissions(m.Author.ID, ch.ID)
+	if err != nil {
+		return
+	}
+
+	if perms&discordgo.PermissionManageMessages == 0 {
+
+		rows, _ := db.Query("SELECT phrase FROM filters WHERE guildid = $1", ch.GuildID)
+
+		isIllegal := false
+
+		for rows.Next() {
+			filter := models.Filter{}
+			err := rows.Scan(&filter.Filter)
+			if err != nil {
+				continue
+			}
+
+			if strings.Contains(m.Content, filter.Filter) {
+				isIllegal = true
+				break
+			}
+		}
+
+		if isIllegal {
+			s.ChannelMessageDelete(ch.ID, m.ID)
+			s.ChannelMessageSend(ch.ID, fmt.Sprintf("%v, you are not allowed to use a banned word/phrase!", m.Author.Mention()))
+		}
 	}
 
 	row := db.QueryRow("SELECT * FROM discordusers WHERE userid = $1", m.Author.ID)
@@ -319,6 +366,112 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 	}
 
+	if args[0] == "m?filter" {
+
+		if perms&discordgo.PermissionManageMessages == 0 {
+			s.ChannelMessageSend(ch.ID, "You do not have permissions to do that.")
+			return
+		}
+
+		if len(args) > 1 {
+
+			if len(args) > 2 {
+
+				phrase := strings.Join(args[2:], " ")
+
+				if len(phrase) < 1 {
+					return
+				}
+
+				if args[1] == "add" {
+					row := db.QueryRow("SELECT * FROM filters WHERE guildid=$1 AND phrase=$2;", ch.GuildID, phrase)
+
+					f := models.Filter{}
+
+					err := row.Scan(&f.Uid, &f.Guildid, &f.Filter)
+					if err != nil {
+						if err != sql.ErrNoRows {
+							return
+						}
+
+						_, err := db.Exec("INSERT INTO filters (guildid, phrase) VALUES ($1,$2);", ch.GuildID, phrase)
+						if err != nil {
+							return
+						}
+						s.ChannelMessageSend(ch.ID, fmt.Sprintf("Added `%v` to the filter.", phrase))
+					} else {
+						s.ChannelMessageSend(ch.ID, "Phrase is already in the filter.")
+					}
+
+				} else if args[1] == "remove" {
+					row := db.QueryRow("SELECT * FROM filters WHERE guildid=$1 AND phrase=$2;", ch.GuildID, phrase)
+
+					f := models.Filter{}
+
+					err := row.Scan(&f.Uid, &f.Guildid, &f.Filter)
+					if err != nil {
+						if err != sql.ErrNoRows {
+							return
+						}
+						fmt.Println(err)
+						s.ChannelMessageSend(ch.ID, "Phrase is not in the filter.")
+					} else {
+						_, err := db.Exec("DELETE FROM filters WHERE guildid=$1 AND phrase=$2;", ch.GuildID, phrase)
+						if err != nil {
+							return
+						}
+						s.ChannelMessageSend(ch.ID, fmt.Sprintf("Removed `%v` from the filter.", phrase))
+					}
+				}
+			} else {
+				if args[1] == "clear" {
+
+					res, err := db.Exec("DELETE FROM filters WHERE guildid = $1;", ch.GuildID)
+					if err != nil {
+						return
+					}
+
+					affected, err := res.RowsAffected()
+					if err != nil {
+						return
+					}
+
+					if affected == 0 {
+						s.ChannelMessageSend(ch.ID, "The filter is empty.")
+					} else {
+						s.ChannelMessageSend(ch.ID, "Cleared the filter.")
+					}
+				}
+			}
+		} else {
+
+			rows, err := db.Query("SELECT * FROM filters WHERE guildid=$1;", ch.GuildID)
+			if err != nil {
+				if err != sql.ErrNoRows {
+					return
+				}
+				s.ChannelMessageSend(ch.ID, "The filter is empty.")
+			}
+
+			filterlist := "```\nList of currently filtered phrases\n"
+
+			for rows.Next() {
+				f := models.Filter{}
+
+				err = rows.Scan(&f.Uid, &f.Guildid, &f.Filter)
+				if err != nil {
+					return
+				}
+
+				filterlist += fmt.Sprintf("- %v\n", f.Filter)
+			}
+
+			filterlist += "```"
+
+			s.ChannelMessageSend(ch.ID, filterlist)
+		}
+	}
+
 	if args[0] == "m?avatar" || args[0] == "m?av" || args[0] == ">av" {
 
 		ch, _ := s.Channel(m.ChannelID)
@@ -349,14 +502,12 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 				Description: fmt.Sprintf("%v has no avatar set.", targetUser.String()),
 			})
 		} else {
-
 			s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{
 				Color: dColorGreen,
 				Title: targetUser.String(),
 				Image: &discordgo.MessageEmbedImage{URL: targetUser.AvatarURL("1024")},
 			})
 		}
-
 	}
 
 	if args[0] == "m?profile" {
@@ -398,6 +549,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 			&dbu.Cangivereptime)
 
 		if err != nil {
+			s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Color: dColorRed, Description: "User not available"})
 			return
 		}
 
@@ -478,7 +630,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 		if diff > 0 {
 			s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{
-				Color: 13107200,
+				Color: dColorRed,
 				//Description: fmt.Sprintf("You can award a reputation point in %dh%dm", int64(diff.Hours()), int64(diff.Round(time.Second)))})
 				Description: strings.TrimSuffix(fmt.Sprintf("You can award a reputation point in %v", diff.Round(time.Minute).String()), "0s")})
 			return
@@ -512,7 +664,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 			return
 		}
 
-		s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Color: 51200, Description: fmt.Sprintf("%v awarded %v a reputation point!", u.Mention(), targetUser.Mention())})
+		s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Color: dColorGreen, Description: fmt.Sprintf("%v awarded %v a reputation point!", u.Mention(), targetUser.Mention())})
 	}
 
 	if args[0] == "m?lb" {
@@ -561,7 +713,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	if args[0] == "m?rplb" {
 
-		rows, err := db.Query("SELECT * FROM discordusers WHERE xp > 0 ORDER BY reputation DESC LIMIT 10 ")
+		rows, err := db.Query("SELECT * FROM discordusers WHERE reputation > 0 ORDER BY reputation DESC LIMIT 10 ")
 		if err != nil {
 			fmt.Println(err)
 			return
@@ -778,10 +930,10 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 						_, err = s.GuildRoleEdit(g.ID, role.ID, newName, role.Color, role.Hoist, role.Permissions, role.Mentionable)
 						if err != nil {
 							if strings.Contains(err.Error(), strconv.Itoa(discordgo.ErrCodeMissingPermissions)) {
-								s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Description: "Missing permissions.", Color: 13107200})
+								s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Description: "Missing permissions.", Color: dColorRed})
 								return
 							}
-							s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Description: "Some error occured: `" + err.Error() + "`.", Color: 13107200})
+							s.ChannelMessageSendEmbed(ch.ID, &discordgo.MessageEmbed{Description: "Some error occured: `" + err.Error() + "`.", Color: dColorRed})
 							return
 						}
 					}
@@ -973,7 +1125,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 				},
 			},
 
-			Color: 13107200,
+			Color: dColorRed,
 		}
 
 		s.ChannelMessageSendEmbed(ch.ID, embed)
@@ -1012,7 +1164,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 		embed := &discordgo.MessageEmbed{
 			Description: fmt.Sprintf("**Unbanned** %v - %v#%v (%v)", targetUser.Mention(), targetUser.Username, targetUser.Discriminator, targetUser.ID),
-			Color:       51200,
+			Color:       dColorGreen,
 		}
 
 		s.ChannelMessageSendEmbed(ch.ID, embed)
@@ -1251,7 +1403,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 					embed := &discordgo.MessageEmbed{
 						Description: "Locked channel.",
-						Color:       51200,
+						Color:       dColorGreen,
 					}
 
 					s.ChannelMessageSendEmbed(ch.ID, embed)
@@ -1302,7 +1454,7 @@ func messageReceivedHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 					embed := &discordgo.MessageEmbed{
 						Description: "Unlocked channel.",
-						Color:       51200,
+						Color:       dColorGreen,
 					}
 
 					s.ChannelMessageSendEmbed(ch.ID, embed)
